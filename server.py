@@ -1,6 +1,5 @@
 #  coding: utf-8 
 import socketserver
-from typing import Protocol
 import os.path
 
 # Copyright 2013 Abram Hindle, Eddie Antonio Santos
