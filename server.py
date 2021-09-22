@@ -1,6 +1,7 @@
 #  coding: utf-8 
 import socketserver
 from typing import Protocol
+import os.path
 
 # Copyright 2013 Abram Hindle, Eddie Antonio Santos
 # 
@@ -33,36 +34,71 @@ class MyWebServer(socketserver.BaseRequestHandler):
     def handle(self):
         self.data = self.request.recv(1024).strip()
         print ("Got a request of: %s\n" % self.data)
-        self.request.sendall(bytearray("OK",'utf-8'))
-
-        root = "./www" # root+start_line[1],  # path of the resource e.g. "./www/base.html"
+        
         method, path, protocol = self.parse_request()  # a dictionary that contains the data of the request's start-line
         print("start_line_data: ", method, path, protocol)
         
         mime_type = self.get_mime_type(path)
         print("mime_type: %s\n" % mime_type)
 
-    # site: https://stackoverflow.com/questions/18563664/socketserver-python
-    def parse_request(self):
-        # decoded byte object to string object, then split by \r\n
-        # ['GET / HTTP/1.1', 'Host: 127.0.0.1:8080', 'User-Agent: curl/7.64.1', 'Accept: */*']
-        lines = self.data.decode("utf-8").splitlines()
-        start_line = lines[0].split()
-        return start_line[0], start_line[1], start_line[2]
-
-    def get_mime_type(self, path):
-        if "/" == path:
-            return "root"
-
-        if path.endswith("/"):
-            path = path[:-1]  # remove / at the end
         
-        if "/" in path:
-            p = path.split("/")[-1]
-            if "." in p:
-                if len(p.split(".")) == 2:
-                    return "text/"+p.split(".")[1]
-        return "invalid"
+        response = None
+        if method != "GET":
+            response = self.get_respond(405)
+        elif mime_type == "invalid":
+            response = self.get_respond(404)
+        else:
+            body = self.get_file_content(path)
+            if body != "error":
+                response = self.get_respond(200, mime_type, body)
+
+        self.request.sendall(bytearray(response,'utf-8'))
+
+
+    # site: https://stackoverflow.com/questions/18563664/socketserver-python by sberry on Sep 1st 2013
+    def parse_request(self):
+        root = "./www"  # path of the resource e.g. "./www/base.html"
+        # decoded byte object to string object, then split by \r\n
+        lines = self.data.decode("utf-8").splitlines()
+        # ['GET / HTTP/1.1', 'Host: 127.0.0.1:8080', 'User-Agent: curl/7.64.1', 'Accept: */*']
+        method, path, protocol = lines[0].split()
+        if path.endswith("/"):
+            path = path + "index.html"
+        return method, root+path, protocol
+
+
+    # site: https://docs.python.org/3/library/os.path.html#os.path.splitext
+    def get_mime_type(self, path):
+        root, ext = os.path.splitext(path)
+        print("root: ",root, "ext: ",ext)
+        if ext != "":
+            return "text/" + ext.split(".")[1]
+        else:
+            return "invalid"
+            
+
+    def get_file_content(self, path):
+        try:
+            f = open(path, "r")
+        except Exception as e:
+            body = "error"
+            print("Err: ", e)
+        else:
+            body = f.read()
+            f.close()
+        finally:
+            return body
+
+
+    def get_respond(self, status, mime_type=None, body=None):
+        if status == 200:
+            return "HTTP/1.1 200 OK\r\nContent-Type: " + mime_type + "\r\n\r\n" + body + "\r\n"
+        elif status == 301:
+            return "HTTP/1.1 301 Moved Permanently\r\n"
+        elif status == 404:
+            return "HTTP/1.1 404 Not FOUND!\r\nConnection: close\r\n"
+        elif status == 405:
+            return "HTTP/1.1 405 Method Not Allowed\r\n"
 
 
 if __name__ == "__main__":
