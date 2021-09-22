@@ -35,70 +35,88 @@ class MyWebServer(socketserver.BaseRequestHandler):
         self.data = self.request.recv(1024).strip()
         print ("Got a request of: %s\n" % self.data)
         
-        method, path, protocol = self.parse_request()  # a dictionary that contains the data of the request's start-line
-        print("start_line_data: ", method, path, protocol)
+        root = "./www"
+        method, file, protocol, host = self.parse_request()  # a dictionary that contains the data of the request's start-line
         
-        mime_type = self.get_mime_type(path)
-        print("mime_type: %s\n" % mime_type)
-
-        
+        path = root + file  # path of the resource e.g. "./www/base.html"
         response = None
-        if method != "GET":
-            response = self.get_respond(405)
-        elif mime_type == "invalid":
-            response = self.get_respond(404)
+        
+        if file.endswith("/"):
+            path = path + "index.html" 
+
+        # Determine the respond
+        if method != "GET":  # HEAD POST PUT DELETE are not allowed
+            response = self.response_405()     
+        elif not file.endswith("/") and os.path.isdir(path):
+            redirec_path = file + "/"  # redirect if the file/folder exists e.g. /deep -> /deep/
+            response = self.response_301(redirec_path, host)
+        elif os.path.isfile(path):
+            # only the existing file can be read
+            mime_type = self.get_mime_type(path)
+            if mime_type != "folder":
+                body = self.get_file_content(path)
+                if body != "error":
+                    response = self.response_200(mime_type, body)
+                else:
+                    response = self.response_404()
+            else:
+                response = self.response_404()
         else:
-            body = self.get_file_content(path)
-            if body != "error":
-                response = self.get_respond(200, mime_type, body)
+                response = self.response_404()
 
         self.request.sendall(bytearray(response,'utf-8'))
 
 
     # site: https://stackoverflow.com/questions/18563664/socketserver-python by sberry on Sep 1st 2013
     def parse_request(self):
-        root = "./www"  # path of the resource e.g. "./www/base.html"
+        host = None
         # decoded byte object to string object, then split by \r\n
         lines = self.data.decode("utf-8").splitlines()
-        # ['GET / HTTP/1.1', 'Host: 127.0.0.1:8080', 'User-Agent: curl/7.64.1', 'Accept: */*']
-        method, path, protocol = lines[0].split()
-        if path.endswith("/"):
-            path = path + "index.html"
-        return method, root+path, protocol
+        # get the method, file, protocol of the request
+        # e.g. ['GET / HTTP/1.1', 'Host: 127.0.0.1:8080', 'User-Agent: curl/7.64.1', 'Accept: */*']
+        method, file, protocol = lines[0].split()
+        # get the host of the request
+        for line in lines:
+            if "Host:" in line:
+                host = "http://"+line.split()[-1]
+        return method, file, protocol, host
 
 
     # site: https://docs.python.org/3/library/os.path.html#os.path.splitext
     def get_mime_type(self, path):
         root, ext = os.path.splitext(path)
-        print("root: ",root, "ext: ",ext)
         if ext != "":
+            # the last level of the path indicate a valid file
             return "text/" + ext.split(".")[1]
         else:
-            return "invalid"
+            # the last level of the path indicate a folder
+            return "folder"
             
 
     def get_file_content(self, path):
+        # read file body
         try:
             f = open(path, "r")
-        except Exception as e:
+        except Exception:
             body = "error"
-            print("Err: ", e)
         else:
             body = f.read()
             f.close()
         finally:
             return body
 
+    # site: https://eclass.srv.ualberta.ca/pluginfile.php/7447795/mod_resource/content/1/05-HTTP-II.pdf by Abram Hindle under Creative Commons Attribution-ShareAlike 4.0 International License
+    def response_200(self, mime_type, body):
+        return "HTTP/1.1 200 OK\r\nContent-Type: " + mime_type + "\r\n\r\n" + body + "\r\n"
 
-    def get_respond(self, status, mime_type=None, body=None):
-        if status == 200:
-            return "HTTP/1.1 200 OK\r\nContent-Type: " + mime_type + "\r\n\r\n" + body + "\r\n"
-        elif status == 301:
-            return "HTTP/1.1 301 Moved Permanently\r\n"
-        elif status == 404:
-            return "HTTP/1.1 404 Not FOUND!\r\nConnection: close\r\n"
-        elif status == 405:
-            return "HTTP/1.1 405 Method Not Allowed\r\n"
+    def response_301(self, redirec_path, host):
+        return "HTTP/1.1 301 Moved Permanently\r\nLocation: " + host + redirec_path + "\r\n"
+
+    def response_404(self):
+        return "HTTP/1.1 404 Not Found\r\nConnection: close\r\n"
+
+    def response_405(self):
+        return "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n"
 
 
 if __name__ == "__main__":
